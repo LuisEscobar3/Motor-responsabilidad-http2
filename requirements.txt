@@ -1,32 +1,32 @@
 # --- LangChain stack (versiones compatibles) ---
-langchain==0.3.27
-langchain-core==0.3.76
-langchain-experimental==0.3.2
+langchain
+langchain-core
+langchain-experimental
 
 # --- API (FastAPI + server para Cloud Run) ---
-fastapi==0.124.4
-uvicorn==0.38.0
-gunicorn==23.0.0
+fastapi
+uvicorn
+gunicorn
 
 # Si vas a recibir archivos (multipart/form-data) en endpoints
 python-multipart>=0.0.9
 
 # Si haces llamadas HTTP salientes (APIs externas)
-httpx>=0.27.0
+httpx
 
 # --- NLP / ML ---
-transformers==4.44.2
-numpy==1.26.4
+transformers
+numpy
 
 # --- Validaciones / utils ---
-pydantic[email]==2.11.9
-python-dotenv==1.0.1
+pydantic[email]
+python-dotenv
 
 # --- DB ---
-psycopg2-binary==2.9.10
+psycopg2-binary
 
 # --- PDF -> JPG (PyMuPDF) ---
-pymupdf==1.24.10
+pymupdf
 
 # --- Otros ---
 openpyxl
