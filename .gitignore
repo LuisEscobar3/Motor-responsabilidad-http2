@@ -1,0 +1,14 @@
+# files 
+response.csv
+USE.md
+TODO.md
+
+# folders
+audios/
+llamadas-cobranzas-libertador/
+transcripciones/
+
+
+# envs
+.env
+v_transcripciones
