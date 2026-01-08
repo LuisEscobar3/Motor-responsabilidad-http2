@@ -29,6 +29,7 @@ psycopg2-binary
 pymupdf
 
 # --- Otros ---
+pandas
 openpyxl
 pyyaml
 
