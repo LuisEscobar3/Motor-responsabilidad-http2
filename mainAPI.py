@@ -129,21 +129,29 @@ def _procesar_caso_por_rutas(
 # ============================================================
 @app.post("/process-case")
 async def process_case(
-    visual_pdf: UploadFile = File(...),
-    audio: UploadFile = File(...),
+    pdf: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
     case_id: Optional[str] = Form(None),
 ):
-    _validate_ext(visual_pdf.filename, EXT_VISUAL, "visual_pdf")
-    _validate_ext(audio.filename, EXT_AUDIO, "audio")
+    if not pdf and not audio:
+        raise HTTPException(400, "Debe enviarse al menos un archivo (PDF o audio)")
 
     case_id = case_id or uuid.uuid4().hex
 
-    # Guardar en /tmp (Cloud Run)
-    pdf_path = UPLOAD_DIR / f"{case_id}_visual{Path(visual_pdf.filename).suffix.lower()}"
-    aud_path = UPLOAD_DIR / f"{case_id}_audio{Path(audio.filename).suffix.lower()}"
+    pdf_path = None
+    aud_path = None
 
-    pdf_path.write_bytes(await visual_pdf.read())
-    aud_path.write_bytes(await audio.read())
+    # ===================== PDF =====================
+    if pdf:
+        _validate_ext(pdf.filename, EXT_VISUAL, "pdf")
+        pdf_path = UPLOAD_DIR / f"{case_id}_visual{Path(pdf.filename).suffix.lower()}"
+        pdf_path.write_bytes(await pdf.read())
+
+    # ===================== AUDIO =====================
+    if audio:
+        _validate_ext(audio.filename, EXT_AUDIO, "audio")
+        aud_path = UPLOAD_DIR / f"{case_id}_audio{Path(audio.filename).suffix.lower()}"
+        aud_path.write_bytes(await audio.read())
 
     gemini = app.state.gemini
     contexto_marcus = app.state.contexto_marcus
@@ -152,12 +160,16 @@ async def process_case(
         result = await run_in_threadpool(
             _procesar_caso_por_rutas,
             case_id,
-            str(pdf_path),
-            str(aud_path),
+            str(pdf_path) if pdf_path else None,
+            str(aud_path) if aud_path else None,
             gemini,
             contexto_marcus,
         )
     except Exception as e:
         raise HTTPException(500, f"Error procesando caso {case_id}: {e}")
 
-    return {"ok": True, **result}
+    return {
+        "ok": True,
+        "case_id": case_id,
+        **result
+    }
