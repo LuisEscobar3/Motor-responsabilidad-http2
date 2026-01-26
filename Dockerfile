@@ -1,22 +1,20 @@
-# Usa una imagen base ligera de Python
-FROM python:3.13-slim
+FROM python:3.11-slim
 
-# Establece el directorio de trabajo
 WORKDIR /app
 
-# Copia los requerimientos e instálalos
-COPY requirements.txt .
-# Instalamos las dependencias.
-# Nota: Si tienes dependencias que requieren compilación (como psycopg2 no-binary),
-# podrías necesitar instalar gcc y otras librerías antes de pip install.
-RUN pip install --no-cache-dir -r requirements.txt
+# Esto asegura que si una librería necesita compilar algo de gRPC o Audio, no falle.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copia el resto del código
+COPY requirements.txt .
+
+# Instalamos las librerías y el soporte para HTTP/2
+RUN pip install --no-cache-dir -r requirements.txt uvicorn[standard] h2
+
 COPY . .
 
-# Expone el puerto 8080 (Puerto estándar de Cloud Run)
 EXPOSE 8080
 
-# Ejecuta la aplicación usando Uvicorn directamente para producción.
-# Usamos main_firebase:app ya que es donde está definida tu instancia de FastAPI.
-CMD ["uvicorn", "mainAPI:app", "--host", "0.0.0.0", "--port", "8080"]
+# Ejecución con los timeouts que pediste (10 min) y protocolo h2
+CMD ["uvicorn", "mainAPI:app", "--host", "0.0.0.0", "--port", "8080", "--http", "h2", "--timeout-keep-alive", "650"]

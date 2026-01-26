@@ -1,13 +1,13 @@
 steps:
-  # Build the container image
+  # 1. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
     args: [ 'build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/mi-repo/motor-responsabilidad:$COMMIT_SHA', '.' ]
 
-  # Push the container image to Artifact Registry
+  # 2. Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: [ 'push', 'us-central1-docker.pkg.dev/$PROJECT_ID/mi-repo/motor-responsabilidad:$COMMIT_SHA' ]
 
-  # Deploy container image to Cloud Run
+  # 3. Deploy container image to Cloud Run con Configuración Óptima
   - id: "deploy cloud run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
@@ -19,7 +19,15 @@ steps:
         --image us-central1-docker.pkg.dev/$PROJECT_ID/mi-repo/motor-responsabilidad:$COMMIT_SHA \
         --no-allow-unauthenticated \
         --port 8080 \
-        --labels billing-tag=ia-mv-motor-responsabilidad, vp=patrimoniales,team=movildiad,tipo=proyecto
+        --memory 8Gi \
+        --cpu 4 \
+        --timeout 600 \
+        --concurrency 80 \
+        --cpu-boost \
+        --use-http2 \
+        --service-account makers-npatr-19@sandbox-ia-404016.iam.gserviceaccount.com \
+        --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
+        --labels billing-tag=ia-mv-motor-responsabilidad,vp=patrimoniales,team=movildiad,tipo=proyecto
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/mi-repo/motor-responsabilidad:$COMMIT_SHA'

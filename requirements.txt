@@ -1,40 +1,37 @@
-# --- LangChain stack (versiones compatibles) ---
+# --- Servidor y Protocolo (CRÍTICO para HTTP/2) ---
+fastapi
+uvicorn[standard]
+h2
+gunicorn
+
+# --- LangChain stack ---
 langchain
 langchain-core
 langchain-experimental
 langchain-google-genai
 
-
+# --- Google Cloud ---
 google-cloud-storage
-# --- API (FastAPI + server para Cloud Run) ---
-fastapi
-uvicorn
-gunicorn
 
-# Si vas a recibir archivos (multipart/form-data) en endpoints
+# --- API y Comunicaciones ---
 python-multipart>=0.0.9
-
-# Si haces llamadas HTTP salientes (APIs externas)
 httpx
 
-# --- NLP / ML ---
+# --- NLP / ML / Datos ---
 transformers
 numpy
-
-# --- Validaciones / utils ---
-pydantic[email]
-python-dotenv
-
-# --- DB ---
-psycopg2-binary
-
-# --- PDF -> JPG (PyMuPDF) ---
-pymupdf
-
-# --- Otros ---
 pandas
 openpyxl
+
+# --- Validaciones y Utils ---
+pydantic[email]
+python-dotenv
 pyyaml
 
+# --- Base de Datos ---
+psycopg2-binary
+
+# --- Manejo de Archivos ---
+pymupdf
 
 https://carlos.alberto.diaz@segurosbolivar.com:cmVmdGtuOjAxOjE3NzM1MTcyOTM6d0dLcmdIOEFaY0F2MHpZNEJCTGFZZkdRUUJ5@segurosbolivar.jfrog.io/artifactory/transversal-ia-langchain-python-lib-dev-virtual/ia_transversal_langchain_python_lib/2.6.3/ia_transversal_langchain_python_lib-2.6.3-py3-none-any.whl
