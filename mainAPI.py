@@ -1,175 +1,171 @@
 import os
+import time
 import json
 import uuid
-import dotenv
-from pathlib import Path
+import asyncio
+import sys
+import traceback
 from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
+from typing import List, Optional
+from pydantic import BaseModel
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
+from google.cloud import storage
 
-# LangChain import compatible (old/new)
-try:
-    from langchain.globals import set_debug
-except Exception:
-    from langchain_core.globals import set_debug
-
-# --- TU PROYECTO ---
+# --- IMPORTACIONES DE TUS FUNCIONES ---
 from app.commons.services.llm_manager import load_llms
 from app.commons.services.matrix_loader import cargar_matriz_marcus
-
 from app.Funciones.procesar_audio import transcribir_audio_gemini
-from app.Funciones.procesar_imagen import procesar_imagen
+from app.Funciones.procesar_imagen import procesar_evidencia_visual
+from app.Funciones.procesar_video import procesar_video_gemini
 from app.Funciones.Procesar_circunstancias import evaluar_circunstancias_marcus
 
-# ============================================================
-# STORAGE (Cloud Run friendly)
-# ============================================================
-BASE_DIR = Path(os.environ.get("WORKDIR", "/tmp/motor_resp"))
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "outputs"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-EXT_VISUAL = {".pdf"}
-EXT_AUDIO = {".mp3", ".wav", ".m4a", ".ogg"}
+# --- CONFIGURACIÓN ---
+PROJECT_ID = "sb-iapatrimoniales-dev"
+BUCKET_NAME = "bucket-motor-responsabilidad"
 
 
-def _save_json(data: Any, path_file: Path):
-    path_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+class CaseRequest(BaseModel):
+    case_id: str
+    urls_visuales: List[str] = []
+    urls_audios: List[str] = []
+    urls_videos: List[str] = []
 
 
-def _save_text(text: str, path_file: Path):
-    path_file.write_text(text if isinstance(text, str) else str(text), encoding="utf-8")
+def eliminar_de_gcs(urls: List[str]):
+    """Limpia los archivos temporales del bucket."""
+    if not urls: return
+    try:
+        client = storage.Client(project=PROJECT_ID)
+        bucket = client.bucket(BUCKET_NAME)
+        for url in urls:
+            blob_name = url.replace(f"gs://{BUCKET_NAME}/", "")
+            bucket.blob(blob_name).delete()
+            print(f"🗑️  [LIMPIEZA] Eliminado de GCS: {blob_name}", flush=True)
+    except Exception as e:
+        print(f"⚠️  [LIMPIEZA] Error: {e}", flush=True)
 
 
-def _validate_ext(filename: str, allowed: set, label: str):
-    if not filename:
-        raise HTTPException(400, f"Falta archivo: {label}")
-    ext = Path(filename).suffix.lower()
-    if ext not in allowed:
-        raise HTTPException(400, f"Archivo inválido para {label}. Ext permitidas: {sorted(list(allowed))}")
-
-
-# ============================================================
-# LIFESPAN: carga LLM + matriz 1 sola vez
-# ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    dotenv.load_dotenv()
-    set_debug(False)
-    os.environ["APP_ENV"] = os.environ.get("APP_ENV", "sbx")
+    os.environ["APP_ENV"] = "sbx"
+    t_start = time.perf_counter()
+    print("\n⚡ [STARTUP] Iniciando Motor de Responsabilidad...", flush=True)
+    try:
+        # Carga paralela inicial
+        task_llm = run_in_threadpool(load_llms)
+        task_matriz = run_in_threadpool(cargar_matriz_marcus, "app/utils/Descripción Circunstancias.xlsx")
+        llms, matriz = await asyncio.gather(task_llm, task_matriz)
 
-    # 1) LLM
-    llms = load_llms()
-    gemini = llms.get("gemini_pro")
-    if not gemini:
-        raise RuntimeError("No se pudo cargar gemini_pro desde load_llms()")
-    app.state.gemini = gemini
+        app.state.gemini_flash = llms.get("gemini_flash")
+        app.state.gemini_pro = llms.get("gemini_pro")
+        app.state.contexto_marcus = matriz
 
-    # 2) Matriz Marcus
-    marcus_path = os.environ.get("MARCUS_XLSX_PATH", "app/utils/Descripción Circunstancias.xlsx")
-    if not Path(marcus_path).exists():
-        raise RuntimeError(f"No se encontró el Excel Marcus en: {marcus_path}")
-    app.state.contexto_marcus = cargar_matriz_marcus(marcus_path)
-
+        print(f"✅ [LISTO] Servidor operativo en {time.perf_counter() - t_start:.2f}s\n", flush=True)
+    except Exception as e:
+        print(f"❌ [CRÍTICO] Error en arranque: {e}", flush=True)
+        sys.exit(1)
     yield
 
 
-app = FastAPI(title="Motor Responsabilidad API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Motor Marcus GCS", lifespan=lifespan)
+
+
+@app.post("/process-case")
+async def process_case(request: CaseRequest):
+    t_inicio = time.perf_counter()
+    case_id = request.case_id
+    print(f"\n--- 📥 NUEVA PETICIÓN: {case_id} ---", flush=True)
+
+    try:
+        tareas = []
+        nombres = []
+
+        # 1. IDENTIFICACIÓN DE EVIDENCIAS
+        if request.urls_visuales:
+            print(f"🖼️  Detectadas {len(request.urls_visuales)} imágenes/PDFs", flush=True)
+            tareas.append(run_in_threadpool(procesar_evidencia_visual, request.urls_visuales, app.state.gemini_flash))
+            nombres.append("IA_VISUAL")
+
+        if request.urls_audios:
+            print(f"🎙️  Detectados {len(request.urls_audios)} audios", flush=True)
+            for i, url in enumerate(request.urls_audios):
+                tareas.append(run_in_threadpool(transcribir_audio_gemini, url, app.state.gemini_flash))
+                nombres.append(f"IA_AUDIO_{i}")
+
+        if request.urls_videos:
+            print(f"🎥  Detectados {len(request.urls_videos)} videos", flush=True)
+            for i, url in enumerate(request.urls_videos):
+                tareas.append(run_in_threadpool(procesar_video_gemini, url, app.state.gemini_flash))
+                nombres.append(f"IA_VIDEO_{i}")
+
+        if not tareas:
+            print("⚠️  Caso sin evidencias. Abortando.", flush=True)
+            return {"ok": False, "error": "No se enviaron URLs de evidencia."}
+
+        # 2. PROCESAMIENTO PARALELO
+        print(f"🚀 Ejecutando {len(tareas)} procesos de IA simultáneos...", flush=True)
+        t_ia_start = time.perf_counter()
+
+        resultados_lista = await asyncio.gather(*tareas)
+        res_map = dict(zip(nombres, resultados_lista))
+
+        t_ia_total = time.perf_counter() - t_ia_start
+        print(f"⏱️  [PROCESAMIENTO IA] Finalizado en {t_ia_total:.2f}s", flush=True)
+        for nombre in nombres:
+            status = "✅ OK" if "Error" not in str(res_map[nombre]) else "❌ FALLÓ"
+            print(f"   -> {nombre}: {status}", flush=True)
+
+        # 3. RAZONAMIENTO MARCUS
+        print("⚖️  Iniciando razonamiento Marcus (Gemini Pro)...", flush=True)
+        t_marcus_start = time.perf_counter()
+
+        # Consolidar entradas
+        transcripciones = [v for k, v in res_map.items() if "AUDIO" in k]
+        videos_data = [v for k, v in res_map.items() if "VIDEO" in k]
+
+        resultado_final = await run_in_threadpool(
+            evaluar_circunstancias_marcus,
+            llm=app.state.gemini_pro,
+            contexto_marcus=app.state.contexto_marcus,
+            json_visual=json.dumps({
+                "estatica": res_map.get("IA_VISUAL", "N/A"),
+                "videos": videos_data
+            }),
+            json_transcripcion=" | ".join(transcripciones) if transcripciones else "N/A"
+        )
+
+        t_marcus_total = time.perf_counter() - t_marcus_start
+        print(f"⏱️  [MARCUS] Análisis completado en {t_marcus_total:.2f}s", flush=True)
+
+        # 4. LIMPIEZA DE BUCKET
+        urls_a_borrar = request.urls_visuales + request.urls_audios + request.urls_videos
+        await run_in_threadpool(eliminar_de_gcs, urls_a_borrar)
+
+        # 5. RESULTADO FINAL
+        t_total = time.perf_counter() - t_inicio
+        print(f"🏁 [FINAL] Caso {case_id} procesado en {t_total:.2f}s", flush=True)
+        print("-------------------------------------------\n", flush=True)
+
+        return {
+            "ok": True,
+            "case_id": case_id,
+            "tiempos": {
+                "ia_paralela": f"{t_ia_total:.2f}s",
+                "marcus": f"{t_marcus_total:.2f}s",
+                "total_proceso": f"{t_total:.2f}s"
+            },
+            "resultado": resultado_final
+        }
+
+    except Exception as e:
+        print(f"❌ [ERROR EN CASO {case_id}]: {str(e)}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
 @app.get("/health")
 def health():
-    return {"ok": True}
-
-
-# ============================================================
-# CORE: pipeline (PDF + AUDIO)
-# ============================================================
-def _procesar_caso_por_rutas(
-    case_id: str,
-    ruta_visual_pdf: str,
-    ruta_audio: str,
-    gemini,
-    contexto_marcus,
-) -> Dict[str, Any]:
-    out_case_dir = OUTPUT_DIR / case_id
-    out_case_dir.mkdir(parents=True, exist_ok=True)
-
-    # 1) ANALISIS VISUAL (PDF)
-    hechos_visual = procesar_imagen(ruta_visual_pdf, llm=gemini)
-    _save_json(hechos_visual, out_case_dir / "hechos_visual.json")
-
-    # 2) TRANSCRIPCIÓN AUDIO
-    texto_transcrito = transcribir_audio_gemini(ruta_audio, llm=gemini)
-    _save_text(texto_transcrito, out_case_dir / "transcripcion.txt")
-
-    # 3) EVALUAR CIRCUNSTANCIAS MARCUS
-    resultado_circunstancias = evaluar_circunstancias_marcus(
-        contexto_marcus=contexto_marcus,
-        json_visual=hechos_visual.get("resultado", hechos_visual),
-        json_transcripcion=texto_transcrito,
-        llm=gemini,
-    )
-    _save_json(resultado_circunstancias, out_case_dir / "resultado_circunstancias.json")
-
-    return {
-        "case_id": case_id,
-        "hechos_visual": hechos_visual,
-        "transcripcion_text": texto_transcrito,
-        "resultado_circunstancias": resultado_circunstancias,
-        "outputs_dir": str(out_case_dir),
-    }
-
-
-# ============================================================
-# ENDPOINT: recibe 2 archivos (PDF + AUDIO) y procesa 1 caso
-# ============================================================
-@app.post("/process-case")
-async def process_case(
-    pdf: Optional[UploadFile] = File(None),
-    audio: Optional[UploadFile] = File(None),
-    case_id: Optional[str] = Form(None),
-):
-    if not pdf and not audio:
-        raise HTTPException(400, "Debe enviarse al menos un archivo (PDF o audio)")
-
-    case_id = case_id or uuid.uuid4().hex
-
-    pdf_path = None
-    aud_path = None
-
-    # ===================== PDF =====================
-    if pdf:
-        _validate_ext(pdf.filename, EXT_VISUAL, "pdf")
-        pdf_path = UPLOAD_DIR / f"{case_id}_visual{Path(pdf.filename).suffix.lower()}"
-        pdf_path.write_bytes(await pdf.read())
-
-    # ===================== AUDIO =====================
-    if audio:
-        _validate_ext(audio.filename, EXT_AUDIO, "audio")
-        aud_path = UPLOAD_DIR / f"{case_id}_audio{Path(audio.filename).suffix.lower()}"
-        aud_path.write_bytes(await audio.read())
-
-    gemini = app.state.gemini
-    contexto_marcus = app.state.contexto_marcus
-
-    try:
-        result = await run_in_threadpool(
-            _procesar_caso_por_rutas,
-            case_id,
-            str(pdf_path) if pdf_path else None,
-            str(aud_path) if aud_path else None,
-            gemini,
-            contexto_marcus,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Error procesando caso {case_id}: {e}")
-
-    return {
-        "ok": True,
-        "case_id": case_id,
-        **result
-    }
+    return {"status": "ok"}

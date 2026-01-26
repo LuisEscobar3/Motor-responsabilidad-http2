@@ -2,7 +2,10 @@
 langchain
 langchain-core
 langchain-experimental
+langchain-google-genai
 
+
+google-cloud-storage
 # --- API (FastAPI + server para Cloud Run) ---
 fastapi
 uvicorn

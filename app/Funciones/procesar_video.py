@@ -3,34 +3,34 @@ from google.cloud import storage
 from langchain_core.messages import HumanMessage
 
 
-def transcribir_audio_gemini(uri_gcs, llm):
+def procesar_video_gemini(uri_gcs, llm):
     try:
         client = storage.Client()
-        # Extraer bucket y path
         bucket_name = uri_gcs.split("/")[2]
         blob_name = "/".join(uri_gcs.split("/")[3:])
 
         # Descarga de bytes
         t_start = time.perf_counter()
         blob = client.bucket(bucket_name).blob(blob_name)
-        audio_bytes = blob.download_as_bytes()
-        print(f"⏱️  [AUDIO] Descarga GCS: {time.perf_counter() - t_start:.2f}s")
+        video_bytes = blob.download_as_bytes()
+        print(f"⏱️  [VIDEO] Descarga GCS: {time.perf_counter() - t_start:.2f}s")
 
         # Petición a IA
         mensaje = HumanMessage(content=[
-            {"type": "text", "text": "Transcribe este audio detallando los hechos del accidente."},
+            {"type": "text",
+             "text": "Analiza este video del accidente. Describe la secuencia de eventos, quién impacta a quién y cualquier infracción visible."},
             {
                 "type": "media",
-                "data": audio_bytes,
-                "mime_type": "audio/mpeg"
+                "data": video_bytes,
+                "mime_type": "video/mp4"
             }
         ])
 
         t_ia = time.perf_counter()
         respuesta = llm.invoke([mensaje])
-        print(f"⏱️  [AUDIO] IA Procesamiento: {time.perf_counter() - t_ia:.2f}s")
+        print(f"⏱️  [VIDEO] IA Procesamiento: {time.perf_counter() - t_ia:.2f}s")
 
         return respuesta.content
     except Exception as e:
-        print(f"❌ Error Audio: {str(e)}")
-        return f"Error en audio: {str(e)}"
+        print(f"❌ Error Video: {str(e)}")
+        return f"Error video: {str(e)}"

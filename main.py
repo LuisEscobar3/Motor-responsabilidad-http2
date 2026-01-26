@@ -1,176 +1,143 @@
 import os
 import json
+import uuid
 import dotenv
-from langchain.globals import set_debug
+import asyncio
+import logging
+from pathlib import Path
+from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any, List
 
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+
+# --- TU PROYECTO ---
 from app.commons.services.llm_manager import load_llms
 from app.commons.services.matrix_loader import cargar_matriz_marcus
 
 from app.Funciones.procesar_audio import transcribir_audio_gemini
-from app.Funciones.procesar_imagen import procesar_imagen, procesar_imagen_ficha
+from app.Funciones.procesar_imagen import procesar_evidencia_visual  # Función actualizada para bytes
+from app.Funciones.procesar_video import procesar_video_gemini  # Nuevo módulo
 from app.Funciones.Procesar_circunstancias import evaluar_circunstancias_marcus
-from app.Funciones.presicion import evaluar_coherencia_visual_vs_ficha
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# CONFIGURACIÓN GENERAL
+# LIFESPAN: Carga única de modelos y matriz
 # ============================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    dotenv.load_dotenv()
+    os.environ["APP_ENV"] = os.environ.get("APP_ENV", "sbx")
 
-dotenv.load_dotenv()
-set_debug(False)
-os.environ["APP_ENV"] = os.environ.get("APP_ENV", "sbx")
-
-llms = load_llms()
-gemini = llms["gemini_pro"]
-
-ruta_excel_marcus = r"app/utils/Descripción Circunstancias.xlsx"
-contexto_marcus = cargar_matriz_marcus(ruta_excel_marcus)
-
-
-# ============================================================
-# EXTENSIONES PERMITIDAS
-# ============================================================
-
-EXT_VISUAL = {".pdf"}             # imagen para análisis visual
-EXT_FICHA = {".png"}              # imagen para FICHA DEL SINIESTRO
-EXT_AUDIO = {".mp3", ".wav", ".m4a", ".ogg"}
-
-
-# ============================================================
-# UTILIDADES
-# ============================================================
-
-def _listar_archivos_por_extension(directorio, extensiones):
-    archivos = []
+    # 1) Carga independiente de LLMs (Flash y Pro)
     try:
-        for nombre in sorted(os.listdir(directorio)):
-            ruta = os.path.join(directorio, nombre)
-            if os.path.isfile(ruta):
-                _, ext = os.path.splitext(nombre)
-                if ext.lower() in extensiones:
-                    archivos.append(ruta)
-    except FileNotFoundError:
-        pass
-    return archivos
+        app.state.llms = load_llms()
+        if not app.state.llms.get("gemini_flash") or not app.state.llms.get("gemini_pro"):
+            raise RuntimeError("Faltan modelos Gemini en la configuración")
 
-
-def _ensure_dir(path_dir):
-    os.makedirs(path_dir, exist_ok=True)
-
-
-def _save_json(data, path_file):
-    try:
-        with open(path_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"💾 Guardado JSON: {path_file}")
+        # 2) Carga de Matriz Marcus
+        marcus_path = os.environ.get("MARCUS_XLSX_PATH", "app/utils/Descripción Circunstancias.xlsx")
+        app.state.contexto_marcus = cargar_matriz_marcus(marcus_path)
+        logger.info("✅ Modelos y Matriz Marcus cargados exitosamente.")
     except Exception as e:
-        print(f"⚠️ No se pudo guardar {path_file}: {e}")
+        logger.error(f"❌ Error crítico en inicio: {e}")
+        raise e
+
+    yield
 
 
-def _save_text(text, path_file):
+app = FastAPI(title="Motor Responsabilidad API v2", lifespan=lifespan)
+
+
+# ============================================================
+# UTILIDADES ASÍNCRONAS
+# ============================================================
+async def safe_run_task(func, *args):
+    """Ejecuta una función en un hilo separado y captura errores sin detener el pipeline."""
     try:
-        with open(path_file, "w", encoding="utf-8") as f:
-            f.write(text if isinstance(text, str) else str(text))
-        print(f"💾 Guardado TXT: {path_file}")
+        if args[0] is None: return None  # Si no hay datos (bytes), no ejecutar
+        return await run_in_threadpool(func, *args)
     except Exception as e:
-        print(f"⚠️ No se pudo guardar {path_file}: {e}")
+        logger.error(f"⚠️ Error en {func.__name__}: {e}")
+        return {"error": str(e)}
 
 
 # ============================================================
-# DIRECTORIOS PRINCIPALES
+# ENDPOINT PRINCIPAL (Optimizado con HTTP/2 y Paralelismo)
 # ============================================================
+@app.post("/process-case")
+async def process_case(
+        archivos_visuales: List[UploadFile] = File(None),  # PDF o múltiples imágenes
+        audio: Optional[UploadFile] = File(None),
+        video: Optional[UploadFile] = File(None),
+        case_id: Optional[str] = Form(None),
+):
+    case_id = case_id or uuid.uuid4().hex
+    llms = app.state.llms
 
-raiz_casos = r"./inputs"
-out_root = r"C:\Users\1032497498\PycharmProjects\Motor__responsabilidad\outputs"
+    # 1. Lectura de bytes (Sin escritura en disco para máxima velocidad)
+    visual_payload = []
+    if archivos_visuales:
+        for f in archivos_visuales:
+            visual_payload.append({"bytes": await f.read(), "mime": f.content_type})
+
+    aud_bytes = await audio.read() if audio else None
+    vid_bytes = await video.read() if video else None
+
+    # 2. Ejecución en Paralelo (Independencia de IAs)
+    # Usamos Gemini Flash para las tareas de extracción por su baja latencia
+    logger.info(f"🚀 Procesando caso {case_id} en paralelo...")
+
+    tareas = [
+        safe_run_task(procesar_evidencia_visual, visual_payload, llms["gemini_flash"]),
+        safe_run_task(transcribir_audio_gemini, aud_bytes, llms["gemini_flash"]),
+        safe_run_task(procesar_video_gemini, vid_bytes, llms["gemini_flash"])
+    ]
+
+    # asyncio.gather espera a que todas terminen simultáneamente
+    resultados = await asyncio.gather(*tareas)
+
+    res_visual = resultados[0]
+    res_audio = resultados[1]
+    res_video = resultados[2]
+
+    # 3. Evaluación Final de Marcus (Carga de Razonamiento Independiente)
+    # Se utiliza Gemini Pro para la decisión final basada en la Matriz
+    try:
+        # Consolidamos las fuentes visuales (Imágenes/PDF + Video)
+        contexto_visual_total = {
+            "evidencia_estatica": res_visual,
+            "evidencia_dinamica_video": res_video
+        }
+
+        logger.info("⚖️ Iniciando adjudicación Marcus...")
+        resultado_final = await run_in_threadpool(
+            evaluar_circunstancias_marcus,
+            llm=llms["gemini_pro"],
+            contexto_marcus=app.state.contexto_marcus,
+            json_visual=json.dumps(contexto_visual_total),
+            json_transcripcion=str(res_audio)
+        )
+
+        return {
+            "ok": True,
+            "case_id": case_id,
+            "status": "success",
+            "resultado": resultado_final
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Error en evaluación de Marcus: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "case_id": case_id, "error": "Fallo en razonamiento final", "detalle": str(e)}
+        )
 
 
-# ============================================================
-# LOOP PRINCIPAL
-# ============================================================
-
-if not os.path.isdir(raiz_casos):
-    raise FileNotFoundError(f"Directorio raíz no encontrado: {raiz_casos}")
-
-subdirectorios = [
-    os.path.join(raiz_casos, d)
-    for d in sorted(os.listdir(raiz_casos))
-    if os.path.isdir(os.path.join(raiz_casos, d))
-]
-
-if not subdirectorios:
-    print(f"No se encontraron casos en: {raiz_casos}")
-
-
-for dir_caso in subdirectorios:
-    nombre_caso = os.path.basename(dir_caso)
-    print(f"\n================= CASO: {nombre_caso} =================")
-
-    # Buscar archivos específicos
-    visual_pdf = _listar_archivos_por_extension(dir_caso, EXT_VISUAL)
-    ficha_png = _listar_archivos_por_extension(dir_caso, EXT_FICHA)
-    audios = _listar_archivos_por_extension(dir_caso, EXT_AUDIO)
-
-    if not visual_pdf:
-        print(f"⚠️  Sin PDF para análisis visual en {nombre_caso}. Se omite.")
-        continue
-
-    if not ficha_png:
-        print(f"⚠️  Sin PNG para la ficha del siniestro en {nombre_caso}. Se omite.")
-        continue
-
-    if not audios:
-        print(f"⚠️  Sin audio en {nombre_caso}. Se omite.")
-        continue
-
-    ruta_visual = visual_pdf[0]
-    ruta_ficha = ficha_png[0]
-    ruta_audio = audios[0]
-
-    # Carpeta salida
-    out_case_dir = os.path.join(out_root, nombre_caso)
-    _ensure_dir(out_case_dir)
-
-    # ============================================================
-    # 1) ANALISIS VISUAL
-    # ============================================================
-    hechos_visual = procesar_imagen(ruta_visual, llm=gemini)
-    print("🖼️ Hechos visuales extraídos OK.")
-    _save_json(hechos_visual, os.path.join(out_case_dir, "hechos_visual.json"))
-
-    # ============================================================
-    # 2) FICHA DEL SINIESTRO (PNG)
-    # ============================================================
-    ficha_siniestro = procesar_imagen_ficha(ruta_ficha, gemini)
-    print("📄 Ficha del siniestro extraída OK.")
-    _save_json(ficha_siniestro, os.path.join(out_case_dir, "ficha_siniestro.json"))
-
-    # ============================================================
-    # 3) TRANSCRIPCIÓN AUDIO
-    # ============================================================
-    texto_transcrito = transcribir_audio_gemini(ruta_audio, llm=gemini)
-    print("🗣️ Transcripción OK.")
-    _save_text(texto_transcrito, os.path.join(out_case_dir, "transcripcion.txt"))
-
-    # ============================================================
-    # 4) EVALUAR CIRCUNSTANCIAS MARCUS
-    # ============================================================
-    resultado_circunstancias = evaluar_circunstancias_marcus(
-        contexto_marcus=contexto_marcus,
-        json_visual=hechos_visual.get("resultado", hechos_visual),
-        json_transcripcion=texto_transcrito,
-        llm=gemini
-    )
-    print("📘 Resultado circunstancias OK.")
-    _save_json(resultado_circunstancias, os.path.join(out_case_dir, "resultado_circunstancias.json"))
-
-    # ============================================================
-    # 5) EVALUAR PRECISIÓN VISUAL VS FICHA
-    # ============================================================
-    resultado_precision = evaluar_coherencia_visual_vs_ficha(
-        llm=gemini,
-        json_analisis_visual=json.dumps(hechos_visual),
-        json_ficha_siniestro=json.dumps(ficha_siniestro)
-    )
-
-    print("🎯 Evaluación de precisión OK.")
-    _save_json(resultado_precision, os.path.join(out_case_dir, "precision_visual_vs_ficha.json"))
+@app.get("/health")
+def health():
+    return {"status": "ok", "http2_ready": True}
