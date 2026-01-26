@@ -1,33 +1,27 @@
 steps:
-  # 0. ASEGURAR QUE EL REPOSITORIO EXISTA
-  # El "|| true" al final permite que si el repo ya existe, el proceso siga sin fallar.
+  # 0. ASEGURAR REPOSITORIO (Si existe, continúa; si no, lo crea)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud artifacts repositories create ms-motor-responsabilidad \
-        --repository-format=docker \
-        --location=us-east1 || true
+        gcloud artifacts repositories describe ms-motor-responsabilidad --location=us-east1 || \
+        gcloud artifacts repositories create ms-motor-responsabilidad --repository-format=docker --location=us-east1
 
-  # 1. CONSTRUCCIÓN DE LA IMAGEN
-  # Si la imagen ya existe, Docker simplemente la reemplaza.
+  # 1. CONSTRUCCIÓN (Forzamos sin caché para asegurar que no haya basura previa)
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
+      '--no-cache',
       '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA',
-      '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:latest',
       '.'
     ]
 
-  # 2. SUBIDA AL ARTIFACT REGISTRY
+  # 2. PUSH
   - name: 'gcr.io/cloud-builders/docker'
-    args: [
-      'push',
-      'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
-    ]
+    args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA' ]
 
-  # 3. DEPLOY A CLOUD RUN (MODO COMPATIBILIDAD TOTAL)
+  # 3. DEPLOY LIMPIO (Elimina el rastro de HTTP/2)
   - id: "deploy-cloud-run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
@@ -44,10 +38,10 @@ steps:
         --timeout 600 \
         --no-cpu-throttling \
         --cpu-boost \
+        --no-use-http2 \
         --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
         --labels billing-tag=ia-mv-motor-responsabilidad,vp=patrimoniales,team=movildiad,tipo=proyecto
 
-# MANEJO DE LOGS
 options:
   logging: CLOUD_LOGGING_ONLY
 
