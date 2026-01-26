@@ -1,5 +1,5 @@
 steps:
-  # 0. ASEGURAR REPOSITORIO
+  # 0. ASEGURAR QUE EL REPOSITORIO EXISTA
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -9,15 +9,22 @@ steps:
         --repository-format=docker \
         --location=us-east1 || exit 0
 
-  # 1. BUILD
+  # 1. CONSTRUCCIÓN DE LA IMAGEN
   - name: 'gcr.io/cloud-builders/docker'
-    args: [ 'build', '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA', '.' ]
+    args: [
+      'build',
+      '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA',
+      '.'
+    ]
 
-  # 2. PUSH
+  # 2. SUBIDA AL ARTIFACT REGISTRY
   - name: 'gcr.io/cloud-builders/docker'
-    args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA' ]
+    args: [
+      'push',
+      'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
+    ]
 
-  # 3. DEPLOY (Sin HTTP/2 forzado para evitar Error 502)
+  # 3. DESPLIEGUE A CLOUD RUN (MODO COMPATIBILIDAD TOTAL)
   - id: "deploy-cloud-run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
@@ -36,7 +43,9 @@ steps:
         --cpu-boost \
         --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
         --labels billing-tag=ia-mv-motor-responsabilidad,vp=patrimoniales,team=movildiad,tipo=proyecto
+        # Nota: No incluimos --use-http2 para forzar HTTP/1.1 y evitar el error 502 Protocol Error.
 
+# CONFIGURACIÓN DE LOGS PARA CUENTAS DE SERVICIO PERSONALIZADAS
 options:
   logging: CLOUD_LOGGING_ONLY
 

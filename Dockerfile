@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 8080
 
 # Comando optimizado para HTTP/1.1 (Apps Script Compatible)
-CMD ["uvicorn", "mainAPI:app", "--host", "0.0.0.0", "--port", "8080", "--loop", "uvloop", "--timeout-keep-alive", "650"]
+CMD ["uvicorn", "mainAPI:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "650"]
