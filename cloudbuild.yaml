@@ -1,5 +1,6 @@
 steps:
   # 0. ASEGURAR QUE EL REPOSITORIO EXISTA
+  # El "|| true" al final permite que si el repo ya existe, el proceso siga sin fallar.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -7,13 +8,15 @@ steps:
       - |
         gcloud artifacts repositories create ms-motor-responsabilidad \
         --repository-format=docker \
-        --location=us-east1 || exit 0
+        --location=us-east1 || true
 
   # 1. CONSTRUCCIÓN DE LA IMAGEN
+  # Si la imagen ya existe, Docker simplemente la reemplaza.
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
       '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA',
+      '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:latest',
       '.'
     ]
 
@@ -24,7 +27,7 @@ steps:
       'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
     ]
 
-  # 3. DESPLIEGUE A CLOUD RUN (MODO COMPATIBILIDAD TOTAL)
+  # 3. DEPLOY A CLOUD RUN (MODO COMPATIBILIDAD TOTAL)
   - id: "deploy-cloud-run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
@@ -43,9 +46,8 @@ steps:
         --cpu-boost \
         --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
         --labels billing-tag=ia-mv-motor-responsabilidad,vp=patrimoniales,team=movildiad,tipo=proyecto
-        # Nota: No incluimos --use-http2 para forzar HTTP/1.1 y evitar el error 502 Protocol Error.
 
-# CONFIGURACIÓN DE LOGS PARA CUENTAS DE SERVICIO PERSONALIZADAS
+# MANEJO DE LOGS
 options:
   logging: CLOUD_LOGGING_ONLY
 
