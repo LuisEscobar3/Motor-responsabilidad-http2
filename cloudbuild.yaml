@@ -16,7 +16,7 @@ steps:
       - |
         gcloud run deploy motor-responsabilidad-service \
         --region us-east1 \
-        --image us-east1-docker.pkg.dev/$PROJECT_ID/mi-repo/motor-responsabilidad:$COMMIT_SHA \
+        --image us-east1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/motor-responsabilidad:$COMMIT_SHA \
         --no-allow-unauthenticated \
         --port 8080 \
         --memory 8Gi \
