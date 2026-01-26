@@ -27,9 +27,6 @@ EXPOSE 8080
 # 3. --workers 1: En Cloud Run con 4 CPUs, es mejor dejar que Cloud Run escale instancias
 #    en lugar de saturar una sola con demasiados workers de Python (evita bloqueos).
 
-CMD ["uvicorn", "mainAPI:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8080", \
-     "--http", "h2", \
-     "--timeout-keep-alive", "650", \
-     "--timeout-graceful-shutdown", "600"]
+# Eliminamos --http h2 para evitar el error de importación
+# Cloud Run se encarga de la terminación HTTP/2 y se comunica con Uvicorn
+CMD ["uvicorn", "mainAPI:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "650"]

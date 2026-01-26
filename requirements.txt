@@ -33,5 +33,5 @@ psycopg2-binary
 
 # --- Manejo de Archivos ---
 pymupdf
-
+h2
 https://carlos.alberto.diaz@segurosbolivar.com:cmVmdGtuOjAxOjE3NzM1MTcyOTM6d0dLcmdIOEFaY0F2MHpZNEJCTGFZZkdRUUJ5@segurosbolivar.jfrog.io/artifactory/transversal-ia-langchain-python-lib-dev-virtual/ia_transversal_langchain_python_lib/2.6.3/ia_transversal_langchain_python_lib-2.6.3-py3-none-any.whl

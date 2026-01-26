@@ -1,6 +1,6 @@
 steps:
   # 0. ASEGURAR QUE EL REPOSITORIO EXISTA
-  # Si no existe, lo crea. Si ya existe, el "|| exit 0" evita que el build falle.
+  # Usamos el nombre que definimos: ms-motor-responsabilidad
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -8,8 +8,7 @@ steps:
       - |
         gcloud artifacts repositories create ms-motor-responsabilidad \
         --repository-format=docker \
-        --location=us-east1 \
-        --description="Repo para el Motor de Responsabilidad" || exit 0
+        --location=us-east1 || exit 0
 
   # 1. BUILD DE LA IMAGEN
   - name: 'gcr.io/cloud-builders/docker'
@@ -26,17 +25,17 @@ steps:
       'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
     ]
 
-  # 3. DEPLOY A CLOUD RUN (Configuración Elite)
+  # 3. DEPLOY A CLOUD RUN (Sin autenticación y con el nuevo nombre)
   - id: "deploy cloud run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
     args:
       - "-c"
       - |
-        gcloud run deploy motor-responsabilidad-service \
+        gcloud run deploy ia-mv-motor-responsabilidad \
         --region us-east1 \
         --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA \
-        --no-allow-unauthenticated \
+        --allow-unauthenticated \
         --port 8080 \
         --memory 8Gi \
         --cpu 4 \
