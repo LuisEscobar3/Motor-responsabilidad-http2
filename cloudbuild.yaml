@@ -34,7 +34,7 @@ steps:
           --port 8080 \
           --cpu 8 \
           --memory 8Gi \
-          --concurrency 1 \
+          --concurrency 80 \
           --min-instances 1 \
           --max-instances 1 \
           --timeout 600 \
