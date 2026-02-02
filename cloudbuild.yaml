@@ -20,14 +20,15 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA' ]
 
-  # 3. DESPLIEGUE DE LOS 4 JOBS (Audio, Video, Visual, Marcus) - 2 CPU / 4Gi
+  # 3. DESPLIEGUE DE LOS 4 JOBS (Audio, Video, Visual, Marcus)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        # Usamos $$IA para que Cloud Build no lo confunda con una sustitución propia
         for IA in "audio" "video" "visual" "marcus"; do
-          gcloud run jobs deploy job-$IA \
+          gcloud run jobs deploy job-$$IA \
             --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA \
             --region us-east1 \
             --cpu 2 \
@@ -35,7 +36,7 @@ steps:
             --set-env-vars PROJECT_ID=$PROJECT_ID,BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx
         done
 
-  # 4. DESPLIEGUE DEL SERVICIO API PRINCIPAL - 1 CPU / 512Mi (Mínimo solicitado)
+  # 4. DESPLIEGUE DEL SERVICIO API PRINCIPAL
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: /bin/bash
     args:
