@@ -5,8 +5,8 @@ steps:
     args:
       - '-c'
       - |
-        gcloud artifacts repositories describe ms-motor-responsabilidad --location=us-east1 || \
-        gcloud artifacts repositories create ms-motor-responsabilidad --repository-format=docker --location=us-east1
+        gcloud artifacts repositories describe ms-motor-responsabilidad1 --location=us-east1 || \
+        gcloud artifacts repositories create ms-motor-responsabilidad1 --repository-format=docker --location=us-east1
 
   # 1. CONSTRUCCIÓN OPTIMIZADA (Uso de caché para mayor velocidad en el build)
   - name: 'gcr.io/cloud-builders/docker'
@@ -27,7 +27,7 @@ steps:
     args:
       - "-c"
       - |
-        gcloud run deploy ia-mv-motor-responsabilidad \
+        gcloud run deploy ia-mv-motor-responsabilidadv1 \
           --region us-east1 \
           --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA \
           --allow-unauthenticated \
@@ -37,7 +37,7 @@ steps:
           --timeout 600s \
           --min-instances 0 \
           --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
-          --labels billing-tag=ia-mv-motor-responsabilidad,vp=patrimoniales,team=movildiad,tipo=proyecto
+          --labels billing-tag=ia-mv-motor-responsabilidadv1,vp=patrimoniales,team=movildiad,tipo=proyecto
 options:
   logging: CLOUD_LOGGING_ONLY
 
