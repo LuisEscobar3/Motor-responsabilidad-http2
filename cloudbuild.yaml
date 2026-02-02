@@ -43,5 +43,6 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 
+
 images:
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
