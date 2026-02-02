@@ -1,24 +1,30 @@
 import sys
-import asyncio
 import json
+import asyncio
 from app.Funciones.Procesar_circunstancias import evaluar_circunstancias_marcus
 from app.commons.services.llm_manager import load_llms
 from app.commons.services.matrix_loader import cargar_matriz_marcus
 
-async def main():
-    args = {a.split('=')[0]: a.split('=')[1] for a in sys.argv[1:] if '=' in a}
-    llms = load_llms()
-    g_pro = llms.get("gemini_pro")
-    c_marcus = cargar_matriz_marcus("app/utils/Descripción Circunstancias.xlsx")
 
-    # Marcus procesa los datos que le llegan por argumentos
+async def main():
+    # Marcus recibe el payload de datos por línea de comandos
+    args = {a.split('=')[0]: a.split('=')[1] for a in sys.argv[1:] if '=' in a}
+    datos_ia = json.loads(args.get("datos_ia", "[]"))
+
+    llms = load_llms()
+    matriz = cargar_matriz_marcus("app/utils/Descripción Circunstancias.xlsx")
+
+    # Ejecución
     resultado = evaluar_circunstancias_marcus(
-        llm=g_pro,
-        contexto_marcus=c_marcus,
-        json_visual=args.get("urls_visuales", "N/A"),
-        json_transcripcion=args.get("urls_audios", "N/A")
+        llm=llms.get("gemini_pro"),
+        contexto_marcus=matriz,
+        json_visual=str(datos_ia),  # Datos ya procesados
+        json_transcripcion="Datos consolidados"
     )
-    print(f"⚖️ Resultado Marcus: {json.dumps(resultado)}")
+
+    # Imprime el resultado para que la API lo vea en logs
+    print(json.dumps(resultado))
+
 
 if __name__ == "__main__":
     asyncio.run(main())

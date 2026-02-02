@@ -1,60 +1,58 @@
 steps:
-  # 0. ASEGURAR REPOSITORIO EN us-east1
+  # 0. ASEGURAR REPOSITORIO
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud artifacts repositories describe ms-motor-responsabilidad --location=us-east1 || \
-        gcloud artifacts repositories create ms-motor-responsabilidad --repository-format=docker --location=us-east1
+        gcloud artifacts repositories describe ms-motor-responsabilidad1 --location=us-east1 || \
+        gcloud artifacts repositories create ms-motor-responsabilidad1 --repository-format=docker --location=us-east1
 
-  # 1. CONSTRUCCIÓN DE LA IMAGEN
+  # 1. CONSTRUCCIÓN OPTIMIZADA
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
-      '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA',
+      '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA',
       '.'
     ]
 
-  # 2. PUSH
+  # 2. PUSH DE LA IMAGEN
   - name: 'gcr.io/cloud-builders/docker'
-    args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA' ]
+    args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA' ]
 
-  # 3. DESPLIEGUE DE LOS 4 JOBS (Audio, Video, Visual, Marcus)
+  # 3. DESPLIEGUE DE LOS 4 JOBS (Potencia para las IAs)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        # Usamos $$IA para que Cloud Build no lo confunda con una sustitución propia
         for IA in "audio" "video" "visual" "marcus"; do
           gcloud run jobs deploy job-$$IA \
-            --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA \
+            --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA \
             --region us-east1 \
             --cpu 2 \
             --memory 4Gi \
-            --set-env-vars PROJECT_ID=$PROJECT_ID,BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx
+            --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx
         done
 
-  # 4. DESPLIEGUE DEL SERVICIO API PRINCIPAL
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  # 4. DEPLOY DEL SERVICIO PRINCIPAL (Tus Labels y Configuración por defecto)
+  - id: "deploy-cloud-run"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
     args:
       - "-c"
       - |
-        gcloud run deploy ia-motor-api \
+        gcloud run deploy ia-mv-motor-responsabilidadv1 \
           --region us-east1 \
-          --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA \
-          --cpu 1 \
-          --memory 512Mi \
-          --min-instances 1 \
-          --max-instances 3 \
-          --no-cpu-throttling \
-          --allow-unauthenticated \
-          --set-env-vars PROJECT_ID=$PROJECT_ID,BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx
+          --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA \
+          --cpu 2 \
+          --memory 4Gi \
+          --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
+          --labels billing-tag=ia-mv-motor-responsabilidadv1,vp=patrimoniales,team=movildiad,tipo=proyecto \
+          --allow-unauthenticated
 
 options:
   logging: CLOUD_LOGGING_ONLY
 
 images:
-  - 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad/motor-img:$COMMIT_SHA'
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA'
