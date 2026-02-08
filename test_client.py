@@ -61,8 +61,8 @@ def subir_a_gcs(ruta_local):
 
 async def ejecutar_test():
     # URL del servicio Cloud Run (desplegado en modo HTTP/1.1)
-    url_api = "https://ia-mv-motor-responsabilidadv1-993828145189.us-east1.run.app/process-case"
-    #url_api = "http://127.0.0.1:8000/process-case"
+    #url_api = "https://ia-mv-motor-responsabilidadv1-993828145189.us-east1.run.app/process-case"
+    url_api = "http://127.0.0.1:8000/process-case"
 
     # Diccionario con tus archivos locales
     archivos_locales = {

@@ -1,51 +1,45 @@
-import os
-import logging
-from ia_transversal_langchain_python_lib.llm.llm_middleware import LlmMiddleware
-from miscelaneous import load_llm_parameters
+import vertexai
+import time
+from vertexai.generative_models import GenerativeModel
+from app.commons.services.miscelaneous import load_llm_parameters
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
 
 def load_llms():
-    """Inicializa y devuelve los modelos LLM configurados."""
+    """
+    Inicializa el SDK de Vertex AI y carga los modelos en memoria.
+    Se usa print para mayor velocidad de log en GCP.
+    """
+    t_init = time.perf_counter()
+    PROJECT_ID = "sb-iapatrimoniales-dev"
+    LOCATION = "us-central1"
 
-    middleware = LlmMiddleware()
+    try:
+        # Inicialización proactiva de la conexión
+        vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-    modelos = {
-        "gpt": {
-            "config": load_llm_parameters("gpt-4o-mini").get("model_config", {}),
-            "params": load_llm_parameters("gpt-4o-mini").get("model_parameters", {})
-        },
-        "gemini_pro": {
-            "config": load_llm_parameters("gemini-1.5-pro").get("model_config", {}),
-            "params": load_llm_parameters("gemini-1.5-pro").get("model_parameters", {})
-        },
-        "gemini_flash": {
-            "config": load_llm_parameters("gemini-1.5-flash").get("model_config", {}),
-            "params": load_llm_parameters("gemini-1.5-flash").get("model_parameters", {})
+        # Etiquetas de facturación para Seguros Bolívar
+        billing_labels = {
+            'billing-tag': 'ia-mv-motor-responsabilidadv1',
+            'team': 'movilidad',
+            'vp': 'patrimoniales',
+            'tipo': 'proyecto'
         }
-    }
 
-    llms = {
-        "gpt": middleware.get_chat(
-            platform=modelos["gpt"]["config"]["plataform"],
-            provider=modelos["gpt"]["config"]["provider"],
-            model_name=modelos["gpt"]["config"]["model_name"],
-            model_parameters=modelos["gpt"]["params"]
-        ),
-        "gemini_pro": middleware.get_chat(
-            platform=modelos["gemini_pro"]["config"]["plataform"],
-            provider=modelos["gemini_pro"]["config"]["provider"],
-            model_name=modelos["gemini_pro"]["config"]["model_name"],
-            model_parameters=modelos["gemini_pro"]["params"]
-        ),
-        "gemini_flash": middleware.get_chat(
-            platform=modelos["gemini_flash"]["config"]["plataform"],
-            provider=modelos["gemini_flash"]["config"]["provider"],
-            model_name=modelos["gemini_flash"]["config"]["model_name"],
-            model_parameters=modelos["gemini_flash"]["params"]
-        )
-    }
+        # Carga de parámetros técnicos
+        params_pro = load_llm_parameters("gemini-2.5-pro").get("model_parameters", {})
+        params_flash = load_llm_parameters("gemini-2.5-flash").get("model_parameters", {})
 
-    logging.info("✅ Modelos cargados desde llm_manager.py")
-    return llms
+        print(f"🚀 [LLM_INIT] Vertex SDK Nativo inicializado en {time.perf_counter() - t_init:.2f}s", flush=True)
+
+        return {
+            "gemini_pro": GenerativeModel("gemini-2.5-pro"),
+            "gemini_flash": GenerativeModel("gemini-2.5-flash"),
+            "config": {
+                "labels": billing_labels,
+                "params_pro": params_pro,
+                "params_flash": params_flash
+            }
+        }
+    except Exception as e:
+        print(f"❌ [LLM_ERROR] Error en inicialización: {str(e)}", flush=True)
+        raise e

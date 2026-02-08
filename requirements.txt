@@ -28,7 +28,7 @@ pydantic
 pydantic[email]
 python-dotenv
 pyyaml
-
+Torch
 # --- Base de Datos ---
 psycopg2-binary
 

@@ -1,16 +1,56 @@
+import os
 import time
+import json
+import traceback
 import asyncio
-import requests
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from typing import List
-from google.auth import default
-from google.auth.transport.requests import Request
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Motor Marcus Orquestador")
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from google.cloud import storage
 
-PROJECT_ID = "sb-iapatrimoniales-dev"
-REGION = "us-east1"
+from app.commons.services.llm_manager import load_llms
+from app.commons.services.matrix_loader import cargar_matriz_marcus
+from app.Funciones.procesar_audio import transcribir_audio_gemini
+from app.Funciones.procesar_imagen import procesar_evidencia_visual
+from app.Funciones.procesar_video import procesar_video_gemini
+from app.Funciones.Procesar_circunstancias import evaluar_circunstancias_marcus
+
+
+class GlobalResources:
+    LLMS = None
+    CONTEXTO_MARCUS = None
+    IS_READY = False
+
+
+resources = GlobalResources()
+
+
+async def cargar_recursos_proactivamente():
+    t_start = time.perf_counter()
+    print("\n⚡ [SISTEMA] Iniciando carga proactiva de recursos...", flush=True)
+    try:
+        resources.LLMS = await run_in_threadpool(load_llms)
+        resources.CONTEXTO_MARCUS = await run_in_threadpool(
+            cargar_matriz_marcus, "app/utils/Descripción Circunstancias.xlsx"
+        )
+        resources.IS_READY = True
+        print(f"✅ [SISTEMA] Recursos listos en {time.perf_counter() - t_start:.2f}s", flush=True)
+    except Exception as e:
+        print(f"❌ [SISTEMA_ERROR] Fallo en carga: {e}", flush=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    loader_task = asyncio.create_task(cargar_recursos_proactivamente())
+    yield
+    loader_task.cancel()
+
+
+app = FastAPI(title="Motor Marcus - Centralizado", lifespan=lifespan)
 
 
 class CaseRequest(BaseModel):
@@ -20,77 +60,68 @@ class CaseRequest(BaseModel):
     urls_videos: List[str] = []
 
 
-async def run_job_and_wait(job_name: str, args_list: list):
-    """Lanza un Job de Cloud Run y espera a que termine."""
-    credentials, _ = default()
-    credentials.refresh(Request())
-    headers = {"Authorization": f"Bearer {credentials.token}", "Content-Type": "application/json"}
-
-    url = f"https://{REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/{PROJECT_ID}/jobs/{job_name}:run"
-    payload = {"overrides": {"containerOverrides": [{"args": args_list}]}}
-
-    r = requests.post(url, json=payload, headers=headers)
-    if not r.ok:
-        raise RuntimeError(f"Error lanzando {job_name}: {r.text}")
-
-    exec_name = r.json()["metadata"]["name"]
-    exec_url = f"https://{REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/{PROJECT_ID}/executions/{exec_name}"
-
-    while True:
-        status = requests.get(exec_url, headers=headers).json()
-        conditions = status.get("status", {}).get("conditions", [])
-        if any(c["type"] == "Completed" and c["status"] == "True" for c in conditions):
-            return "OK"
-        if any(c["type"] == "Failed" and c["status"] == "True" for c in conditions):
-            raise RuntimeError(f"El Job {job_name} falló.")
-        await asyncio.sleep(5)
-
-
 @app.post("/process-case")
 async def process_case(request: CaseRequest):
-    t_inicio = time.perf_counter()
+    if not resources.IS_READY:
+        raise HTTPException(status_code=503, detail="Motor en carga inicial.")
+
+    t_total_inicio = time.perf_counter()
     case_id = request.case_id
+    print(f"🚀 [CASO: {case_id}] Inicio de procesamiento multimodal", flush=True)
 
     try:
-        # --- 1. PROCESAMIENTO IA PARALELO ---
-        t_ia_start = time.perf_counter()
+        # 1. PROCESAMIENTO MULTIMEDIA (Flash para Audio, Pro para Video/Imagen)
         tareas = []
-
-        if request.urls_audios:
-            for url in request.urls_audios:
-                tareas.append(run_job_and_wait("job-audio", ["job_audio.py", f"uri={url}"]))
-
-        if request.urls_videos:
-            for url in request.urls_videos:
-                tareas.append(run_job_and_wait("job-video", ["job_video.py", f"uri={url}"]))
+        nombres = []
+        tiempos_detalle = {}
 
         if request.urls_visuales:
-            tareas.append(run_job_and_wait("job-visual", ["job_visual.py", f"uris={','.join(request.urls_visuales)}"]))
+            tareas.append(run_in_threadpool(procesar_evidencia_visual, request.urls_visuales, resources.LLMS))
+            nombres.append("IA_VISUAL_PRO")
 
-        if not tareas:
-            raise HTTPException(status_code=400, detail="No hay evidencias para procesar.")
+        if request.urls_audios:
+            for i, url in enumerate(request.urls_audios):
+                tareas.append(run_in_threadpool(transcribir_audio_gemini, url, resources.LLMS))
+                nombres.append(f"IA_AUDIO_FLASH_{i}")
 
-        await asyncio.gather(*tareas)
-        t_ia_total = time.perf_counter() - t_ia_start
+        if request.urls_videos:
+            for i, url in enumerate(request.urls_videos):
+                tareas.append(run_in_threadpool(procesar_video_gemini, url, resources.LLMS))
+                nombres.append(f"IA_VIDEO_PRO_{i}")
 
-        # --- 2. RAZONAMIENTO MARCUS ---
+        t_ia_parallel_start = time.perf_counter()
+        print(f"📡 [CASO: {case_id}] Lanzando tareas multimedia en paralelo...", flush=True)
+        resultados_lista = await asyncio.gather(*tareas)
+        tiempos_detalle["latencia_multimedia_paralela"] = f"{time.perf_counter() - t_ia_parallel_start:.2f}s"
+
+        res_map = dict(zip(nombres, resultados_lista))
+
+        # 2. RAZONAMIENTO MARCUS (Gemini Pro)
+        print(f"🧠 [CASO: {case_id}] Ejecutando análisis lógico Marcus...", flush=True)
         t_marcus_start = time.perf_counter()
-        # Marcus se lanza para consolidar los resultados
-        await run_job_and_wait("job-marcus", ["job_marcus.py", f"case_id={case_id}"])
-        t_marcus_total = time.perf_counter() - t_marcus_start
 
-        t_total = time.perf_counter() - t_inicio
+        transcripciones = [v for k, v in res_map.items() if "AUDIO" in k]
+        videos_data = [v for k, v in res_map.items() if "VIDEO" in k]
 
-        # --- 3. RETORNO DE RESPUESTA ---
+        resultado_final = await run_in_threadpool(
+            evaluar_circunstancias_marcus,
+            llms_resource=resources.LLMS,
+            contexto_marcus=resources.CONTEXTO_MARCUS,
+            json_visual=json.dumps({"estatica": res_map.get("IA_VISUAL_PRO", "N/A"), "videos": videos_data}),
+            json_transcripcion=" | ".join(transcripciones) if transcripciones else "N/A"
+        )
+        tiempos_detalle["latencia_razonamiento_marcus"] = f"{time.perf_counter() - t_marcus_start:.2f}s"
+
+        tiempos_detalle["latencia_total_api"] = f"{time.perf_counter() - t_total_inicio:.2f}s"
+        print(f"🏁 [CASO: {case_id}] Proceso terminado en {tiempos_detalle['latencia_total_api']}", flush=True)
+
         return {
             "ok": True,
             "case_id": case_id,
-            "tiempos": {
-                "ia_paralela": f"{t_ia_total:.2f}s",
-                "marcus": f"{t_marcus_total:.2f}s",
-                "total_proceso": f"{t_total:.2f}s"
-            },
-            "resultado": "Análisis completado exitosamente."
+            "metricas_tiempos": tiempos_detalle,
+            "resultado": resultado_final
         }
+
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        print(f"❌ [CASO_ERROR: {case_id}] Error: {str(e)}", flush=True)
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
