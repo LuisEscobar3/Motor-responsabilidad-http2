@@ -1,5 +1,5 @@
 steps:
-  # 0. ASEGURAR REPOSITORIO
+  # 0. ASEGURAR QUE EL REPOSITORIO DE ARTIFACT REGISTRY EXISTA
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -8,7 +8,7 @@ steps:
         gcloud artifacts repositories describe ms-motor-responsabilidad1 --location=us-east1 || \
         gcloud artifacts repositories create ms-motor-responsabilidad1 --repository-format=docker --location=us-east1
 
-  # 1. CONSTRUCCIÓN OPTIMIZADA
+  # 1. CONSTRUCCIÓN DE LA IMAGEN DOCKER
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
@@ -16,26 +16,12 @@ steps:
       '.'
     ]
 
-  # 2. PUSH DE LA IMAGEN
+  # 2. PUSH DE LA IMAGEN AL REPOSITORIO
   - name: 'gcr.io/cloud-builders/docker'
     args: [ 'push', 'us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA' ]
 
-  # 3. DESPLIEGUE DE LOS 4 JOBS (Potencia para las IAs)
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        for IA in "audio" "video" "visual" "marcus"; do
-          gcloud run jobs deploy job-$$IA \
-            --image us-east1-docker.pkg.dev/$PROJECT_ID/ms-motor-responsabilidad1/motor-img:$COMMIT_SHA \
-            --region us-east1 \
-            --cpu 2 \
-            --memory 4Gi \
-            --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx
-        done
-
-  # 4. DEPLOY DEL SERVICIO PRINCIPAL (Tus Labels y Configuración por defecto)
+  # 3. DESPLIEGUE DEL SERVICIO PRINCIPAL (CLOUD RUN)
+  # Se eliminaron los jobs y se configuraron 4Gi de RAM para evitar reinicios por OOM
   - id: "deploy-cloud-run"
     name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: /bin/bash
@@ -48,7 +34,7 @@ steps:
           --cpu 2 \
           --memory 4Gi \
           --set-env-vars PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=bucket-motor-responsabilidad,APP_ENV=sbx \
-          --labels billing-tag=ia-mv-motor-responsabilidadv1,vp=patrimoniales,team=movildiad,tipo=proyecto \
+          --labels billing-tag=ia-mv-motor-responsabilidadv1,vp=patrimoniales,team=movilidad,tipo=proyecto \
           --allow-unauthenticated
 
 options:
