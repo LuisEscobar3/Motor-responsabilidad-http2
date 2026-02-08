@@ -1,38 +1,26 @@
-# --- Servidor y Protocolo (CRÍTICO para HTTP/2) ---
+# --- Servidor y Protocolo (Optimizado para HTTP/2 en Cloud Run) ---
 fastapi
 uvicorn[standard]
-h2
 gunicorn
+h2
 
-# --- LangChain stack ---
-langchain
-langchain-core
-langchain-experimental
-langchain-google-genai
+# --- SDK Nativo de Google Cloud (Sin LangChain) ---
+# Forzamos la versión estable que soporta labels y Gemini 2.0
+google-cloud-aiplatform==1.71.1
+google-cloud-storage>=2.14.0
 
-# --- Google Cloud ---
-google-cloud-storage
-
-# --- API y Comunicaciones ---
-python-multipart>=0.0.9
-httpx
-
-# --- NLP / ML / Datos ---
-transformers
-numpy
+# --- Procesamiento de Datos y Archivos ---
+# Necesario para la Matriz Marcus y procesamiento de imágenes
 pandas
 openpyxl
+Pillow
+numpy
 
-# --- Validaciones y Utils ---
+# --- Validaciones y Utilidades ---
 pydantic
-pydantic[email]
-python-dotenv
 pyyaml
-Torch
-# --- Base de Datos ---
-psycopg2-binary
+python-dotenv
+python-multipart
 
-# --- Manejo de Archivos ---
-pymupdf
-h2
-https://carlos.alberto.diaz@segurosbolivar.com:cmVmdGtuOjAxOjE3NzM1MTcyOTM6d0dLcmdIOEFaY0F2MHpZNEJCTGFZZkdRUUJ5@segurosbolivar.jfrog.io/artifactory/transversal-ia-langchain-python-lib-dev-virtual/ia_transversal_langchain_python_lib/2.6.3/ia_transversal_langchain_python_lib-2.6.3-py3-none-any.whl
+# --- Base de Datos (Si persiste la conexión) ---
+psycopg2-binary
